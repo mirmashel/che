@@ -1,6 +1,7 @@
 import abc
 
 import numpy as np
+import math
 
 np.seterr(all='raise', under='ignore')
 
@@ -12,7 +13,7 @@ except ImportError:
 
 # region Abstract base classes
 class Layer(abc.ABC):
-    def __init__(self, input_shape=None):
+    def __init__(self, input_shape=None, is_train = False):
         self.input_shape = input_shape
         self.output_shape = None
 
@@ -22,6 +23,13 @@ class Layer(abc.ABC):
         self._parameter_updaters = {}
         self._optimizer = None
         self._is_built = False
+
+        self.name = None
+        self.training = is_train
+
+    def print(self):
+        print(self.name, "| input shape :", self.input_shape, "output shape :", self.output_shape, "parameters :", self.num_of_parameters())
+
 
     def build(self, optimizer, prev_layer=None):
         self._optimizer = optimizer
@@ -111,6 +119,23 @@ def he_initializer(input_dim):
     return _he_initializer
 
 
+def conv_initializer(filters, channels):
+    def _conv_initializer(shape):
+        kernel_size = shape[2]
+        limit = 1 / math.sqrt(np.prod(shape[2:]))
+        a = np.random.uniform(-limit, limit, size=shape)
+        return a
+
+    return _conv_initializer
+
+
+def normal_initializer():
+    def _normal_initializer(shape):
+        return np.random.randn(*shape) 
+
+    return _normal_initializer
+
+
 def range_fn(*args, **kwargs):
     if tqdm is None:
         return range(*args), print, lambda desc: None
@@ -146,6 +171,8 @@ class Model(object):
         self.loss_valid_history = []
         self.accuracy_train_history = []
         self.accuracy_valid_history = []
+
+        self.training = False
 
     def add(self, layer):
         if not self._layers:
@@ -240,6 +267,7 @@ class Model(object):
                 x_gt, y_gt = x_train[p], y_train[p]
 
             train_metrics = np.empty((size // batch_size, 2))
+            self.set_training_status(True)
             for step in range(size // batch_size):
                 ind_slice = slice(step * batch_size, (step + 1) * batch_size)
                 train_metrics[step] = self.fit_batch(
@@ -290,11 +318,27 @@ class Model(object):
         if x_gt.shape[0] != y_gt.shape[0]:
             raise ValueError("x and y must have equal size")
 
+        self.set_training_status(False)
+
         y_pred = np.empty(y_gt.shape)
         size = x_gt.shape[0]
-        for step in range(size // batch_size + 1):
+        for step in range(size // batch_size):
             ind_slice = slice(step * batch_size, (step + 1) * batch_size)
             y_pred[ind_slice] = self.forward(x_gt[ind_slice])
         return self.get_metrics(y_gt, y_pred)
+
+    def set_training_status(self, status):
+        self.training = status
+        for layer in self._layers:
+            layer.training = status
+
+
+    def print_parameters(self):
+        acc_sum = 0
+        for layer in self._layers:
+            layer.print()
+            acc_sum += layer.num_of_parameters()
+        print("Total number of parameters |", acc_sum)
+
 
 # endregion
